@@ -106,7 +106,12 @@ fun UniversalRemoteApp(context: Context) {
         Surface(modifier = Modifier.fillMaxSize(), color = Background) {
             if (showRemote && selected != null) {
                 val device = selected!!
-                if (!device.type.contains("Samsung", ignoreCase = true)) {
+                if (device.type.contains("Xbox", ignoreCase = true)) {
+                    XboxDiscoveryScreen(device) {
+                        showRemote = false
+                        selected = null
+                    }
+                } else if (!device.type.contains("Samsung", ignoreCase = true)) {
                     GoogleTvRemoteScreen(context, device) {
                         showRemote = false
                         selected = null
@@ -196,7 +201,7 @@ fun UniversalRemoteApp(context: Context) {
                         onClick = {
                             devices = emptyList()
                             scanning = true
-                            status = "Searching for Samsung and Google TVs…"
+                            status = "Searching for Samsung, Google and Xbox devices…"
                             discoverer.start {
                                 scanning = false
                                 status = if (devices.isEmpty()) "No compatible services found yet. Make sure both TVs are on and connected to Wi-Fi." else "Discovery finished • ${devices.size} device(s) found"
@@ -407,6 +412,9 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
         // local Wi-Fi subnet for Samsung's documented Smart TV HTTP API on port 8001.
         Thread({ scanSamsungSubnet() }, "Samsung-TV-Subnet-Scan").start()
 
+        // Xbox SmartGlass discovery uses UDP 5050 rather than mDNS.
+        Thread({ scanXboxSmartGlass() }, "Xbox-SmartGlass-Discovery").start()
+
         // Keep DNS-SD discovery alive long enough to receive delayed announcements.
         mainHandler.postDelayed({ finishScan() }, 12000)
     }
@@ -500,5 +508,44 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
             runCatching { manager.stopServiceDiscovery(listener) }
         }
         listeners.clear()
+    }
+}
+
+
+@Composable
+private fun XboxDiscoveryScreen(device: FoundDevice, onBack: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(device.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("XBOX SERIES • SMARTGLASS DISCOVERY", color = Muted, fontSize = 10.sp)
+            }
+        }
+        Spacer(Modifier.height(36.dp))
+        Icon(Icons.Default.SportsEsports, null, tint = Accent, modifier = Modifier.size(58.dp))
+        Spacer(Modifier.height(18.dp))
+        Text("XBOX FOUND", fontWeight = FontWeight.Black, fontSize = 22.sp)
+        Spacer(Modifier.height(10.dp))
+        Text("Console responded to local SmartGlass discovery.", color = Color(0xFF4CAF50))
+        Spacer(Modifier.height(8.dp))
+        Text("${device.host}:5050", color = Muted)
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "This is the first connection milestone. The encrypted SmartGlass session and media controls are not enabled in this build yet.",
+            color = Muted,
+            fontSize = 13.sp
+        )
+        Spacer(Modifier.weight(1f))
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Accent)
+        ) { Text("BACK TO DEVICES", fontWeight = FontWeight.Bold) }
     }
 }
