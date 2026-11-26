@@ -419,6 +419,71 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
         mainHandler.postDelayed({ finishScan() }, 12000)
     }
 
+    private fun scanXboxSmartGlass() {
+        runCatching {
+            DatagramSocket().use { socket ->
+                socket.broadcast = true
+                socket.soTimeout = 450
+                val request = java.nio.ByteBuffer.allocate(16)
+                    .order(java.nio.ByteOrder.BIG_ENDIAN)
+                    .putShort(0xDD00.toShort())
+                    .putShort(10)
+                    .putShort(0)
+                    .putInt(0)
+                    .putShort(0x08)
+                    .putShort(0)
+                    .putShort(2)
+                    .array()
+
+                listOf("255.255.255.255", "239.255.255.250").forEach { target ->
+                    runCatching {
+                        socket.send(DatagramPacket(
+                            request, request.size, InetAddress.getByName(target), 5050
+                        ))
+                    }
+                }
+
+                val deadline = System.currentTimeMillis() + 4500
+                val buffer = ByteArray(4096)
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        val response = DatagramPacket(buffer, buffer.size)
+                        socket.receive(response)
+                        val data = response.data.copyOfRange(0, response.length)
+                        val consoleName = parseXboxDiscoveryName(data) ?: continue
+                        val host = response.address.hostAddress ?: continue
+                        mainHandler.post {
+                            onDevice(FoundDevice(consoleName, "Xbox Series • SmartGlass", host, 5050))
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        // Continue listening until the discovery window closes.
+                    }
+                }
+            }
+        }
+    }
+
+    private fun parseXboxDiscoveryName(packet: ByteArray): String? {
+        if (packet.size < 16) return null
+        val buffer = java.nio.ByteBuffer.wrap(packet).order(java.nio.ByteOrder.BIG_ENDIAN)
+        if ((buffer.short.toInt() and 0xFFFF) != 0xDD01) return null
+        val payloadLength = buffer.short.toInt() and 0xFFFF
+        if (payloadLength <= 0 || payloadLength > packet.size - 6) return null
+
+        // Response fields: flags, client type, then a length-prefixed console name.
+        for (offset in listOf(14, 8)) {
+            if (offset + 2 > packet.size) continue
+            val length = ((packet[offset].toInt() and 0xFF) shl 8) or
+                (packet[offset + 1].toInt() and 0xFF)
+            if (length !in 1..128 || offset + 2 + length > packet.size) continue
+            val name = String(packet, offset + 2, length, Charsets.UTF_8)
+                .trim()
+                .takeIf { it.isNotBlank() && it.none { ch -> ch.isISOControl() } }
+            if (name != null) return name
+        }
+        return "Xbox Console"
+    }
+
     private fun scanSamsungSubnet() {
         val subnet = findWifiSubnet() ?: return
         val (network, prefix, ownAddress) = subnet
