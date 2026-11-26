@@ -1,6 +1,8 @@
 package com.deadmanbp.universalremote
 
 import android.content.Context
+import android.text.Html
+import android.util.Base64
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Bundle
@@ -37,6 +39,16 @@ import java.util.Collections
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 
 private val Background = Color(0xFF101114)
 private val SurfaceDark = Color(0xFF1B1D22)
@@ -55,13 +67,32 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun UniversalRemoteApp(context: Context) {
     var scanning by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf("No TV selected") }
+    var selected by remember { mutableStateOf<FoundDevice?>(null) }
     var devices by remember { mutableStateOf(listOf<FoundDevice>()) }
     var status by remember { mutableStateOf("Ready to discover TVs on your Wi-Fi network") }
+    var showRemote by remember { mutableStateOf(false) }
+    var remoteStatus by remember { mutableStateOf("Not connected") }
+    var connected by remember { mutableStateOf(false) }
+    val prefs = remember { context.getSharedPreferences("tv_tokens", Context.MODE_PRIVATE) }
+    val remoteClient = remember {
+        SamsungRemoteClient(
+            onStatus = { remoteStatus = it },
+            onConnected = { connected = it }
+        )
+    }
+
+    BackHandler(enabled = showRemote) {
+        remoteClient.disconnect()
+        showRemote = false
+        connected = false
+        remoteStatus = "Disconnected"
+    }
 
     val discoverer = remember {
         TvDiscovery(context) { device ->
-            devices = (devices + device).distinctBy { "${it.host}:${it.port}" }
+            val cleanName = Html.fromHtml(device.name, Html.FROM_HTML_MODE_LEGACY).toString()
+            val clean = device.copy(name = cleanName)
+            devices = (devices.filterNot { it.host == clean.host } + clean)
             status = "Found ${devices.size} possible device(s)"
         }
     }
@@ -71,101 +102,251 @@ fun UniversalRemoteApp(context: Context) {
         onBackground = Color.White, onSurface = Color.White
     )) {
         Surface(modifier = Modifier.fillMaxSize(), color = Background) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 26.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Tv, null, tint = Accent, modifier = Modifier.size(30.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("UNIVERSAL", fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                        Text("REMOTE CONTROL", fontSize = 11.sp, color = Muted, letterSpacing = 2.sp)
-                    }
-                    Box(Modifier.size(10.dp).background(Accent, CircleShape))
-                }
-
-                Spacer(Modifier.height(30.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth()
+            if (showRemote && selected != null) {
+                val device = selected!!
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(Modifier.padding(18.dp)) {
-                        Text("CURRENT DEVICE", color = Muted, fontSize = 10.sp, letterSpacing = 1.8.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(selected, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text(status, color = Muted, fontSize = 12.sp)
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-                Button(
-                    onClick = {
-                        devices = emptyList()
-                        scanning = true
-                        status = "Searching for Samsung and Google TVs…"
-                        discoverer.start {
-                            scanning = false
-                            status = if (devices.isEmpty()) "No compatible services found yet. Make sure both TVs are on and connected to Wi-Fi." else "Discovery finished • ${devices.size} device(s) found"
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = {
+                            remoteClient.disconnect()
+                            showRemote = false
+                            connected = false
+                        }) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+                        Column(Modifier.weight(1f)) {
+                            Text(device.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("SAMSUNG TIZEN REMOTE", color = Muted, fontSize = 10.sp, letterSpacing = 1.4.sp)
                         }
-                    },
-                    enabled = !scanning,
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    if (scanning) CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp)
-                    else Icon(Icons.Default.WifiFind, null)
-                    Spacer(Modifier.width(9.dp))
-                    Text(if (scanning) "SCANNING NETWORK…" else "FIND MY TVS", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                }
-
-                Spacer(Modifier.height(20.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("DISCOVERED DEVICES", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                        Box(Modifier.size(10.dp).background(if (connected) Color(0xFF4CAF50) else Accent, CircleShape))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(remoteStatus, color = Muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(24.dp))
+                    RemoteKeyButton("▲", Modifier.size(76.dp)) { remoteClient.sendKey("KEY_UP") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RemoteKeyButton("◀", Modifier.size(76.dp)) { remoteClient.sendKey("KEY_LEFT") }
+                        Spacer(Modifier.width(16.dp))
+                        RemoteKeyButton("OK", Modifier.size(86.dp), true) { remoteClient.sendKey("KEY_ENTER") }
+                        Spacer(Modifier.width(16.dp))
+                        RemoteKeyButton("▶", Modifier.size(76.dp)) { remoteClient.sendKey("KEY_RIGHT") }
+                    }
+                    RemoteKeyButton("▼", Modifier.size(76.dp)) { remoteClient.sendKey("KEY_DOWN") }
+                    Spacer(Modifier.height(22.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        RemoteKeyButton("BACK", Modifier.weight(1f).height(54.dp)) { remoteClient.sendKey("KEY_RETURN") }
+                        Spacer(Modifier.width(12.dp))
+                        RemoteKeyButton("HOME", Modifier.weight(1f).height(54.dp)) { remoteClient.sendKey("KEY_HOME") }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RemoteKeyButton("VOL −", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLUMEDOWN") }
+                        RemoteKeyButton("MUTE", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_MUTE") }
+                        RemoteKeyButton("VOL +", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLUMEUP") }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        RemoteKeyButton("CH −", Modifier.weight(1f).height(54.dp)) { remoteClient.sendKey("KEY_CHDOWN") }
+                        RemoteKeyButton("PLAY / PAUSE", Modifier.weight(1.5f).height(54.dp)) { remoteClient.sendKey("KEY_PLAY") }
+                        RemoteKeyButton("CH +", Modifier.weight(1f).height(54.dp)) { remoteClient.sendKey("KEY_CHUP") }
+                    }
                     Spacer(Modifier.weight(1f))
-                    Text("${devices.size}", color = Accent, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            val savedToken = prefs.getString(device.host, null)
+                            remoteClient.connect(device.host, savedToken)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                    ) { Text(if (connected) "RECONNECT" else "CONNECT TO TV", fontWeight = FontWeight.Bold) }
+                    Text("Approve the connection prompt on your Samsung TV if it appears.", color = Muted, fontSize = 11.sp)
                 }
-                Spacer(Modifier.height(9.dp))
-
-                if (devices.isEmpty()) {
-                    Box(
-                        Modifier.fillMaxWidth().weight(1f).border(1.dp, Color(0xFF303239), RoundedCornerShape(16.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.TvOff, null, tint = Muted, modifier = Modifier.size(38.dp))
-                            Spacer(Modifier.height(10.dp))
-                            Text("No televisions found", color = Muted)
-                            Text("Tap Find My TVs to scan your network", color = Muted, fontSize = 11.sp)
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 26.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Tv, null, tint = Accent, modifier = Modifier.size(30.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("UNIVERSAL", fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            Text("REMOTE CONTROL", fontSize = 11.sp, color = Muted, letterSpacing = 2.sp)
+                        }
+                        Box(Modifier.size(10.dp).background(Accent, CircleShape))
+                    }
+                    Spacer(Modifier.height(30.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = SurfaceDark), shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(18.dp)) {
+                            Text("CURRENT DEVICE", color = Muted, fontSize = 10.sp, letterSpacing = 1.8.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text(selected?.name ?: "No TV selected", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text(status, color = Muted, fontSize = 12.sp)
                         }
                     }
-                } else {
-                    Column(Modifier.weight(1f)) {
-                        devices.forEach { device ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                                    .clickable { selected = device.name },
-                                colors = CardDefaults.cardColors(containerColor = SurfaceDark)
-                            ) {
-                                Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Tv, null, tint = Accent)
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(device.name, fontWeight = FontWeight.Bold)
-                                        Text("${device.type} • ${device.host}:${device.port}", color = Muted, fontSize = 11.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Button(
+                        onClick = {
+                            devices = emptyList()
+                            scanning = true
+                            status = "Searching for Samsung and Google TVs…"
+                            discoverer.start {
+                                scanning = false
+                                status = if (devices.isEmpty()) "No compatible services found yet. Make sure both TVs are on and connected to Wi-Fi." else "Discovery finished • ${devices.size} device(s) found"
+                            }
+                        },
+                        enabled = !scanning,
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        if (scanning) CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp)
+                        else Icon(Icons.Default.WifiFind, null)
+                        Spacer(Modifier.width(9.dp))
+                        Text(if (scanning) "SCANNING NETWORK…" else "FIND MY TVS", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("DISCOVERED DEVICES", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("${devices.size}", color = Accent, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    if (devices.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().weight(1f).border(1.dp, Color(0xFF303239), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.TvOff, null, tint = Muted, modifier = Modifier.size(38.dp))
+                                Spacer(Modifier.height(10.dp))
+                                Text("No televisions found", color = Muted)
+                                Text("Tap Find My TVs to scan your network", color = Muted, fontSize = 11.sp)
+                            }
+                        }
+                    } else {
+                        Column(Modifier.weight(1f)) {
+                            devices.forEach { device ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable {
+                                        selected = device
+                                        if (device.type.contains("Samsung")) {
+                                            showRemote = true
+                                            remoteStatus = "Ready to connect to ${device.host}"
+                                        } else {
+                                            status = "Google TV remote is coming next"
+                                        }
+                                    },
+                                    colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                                ) {
+                                    Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Tv, null, tint = Accent)
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(device.name, fontWeight = FontWeight.Bold)
+                                            Text("${device.type} • ${device.host}:${device.port}", color = Muted, fontSize = 11.sp)
+                                        }
+                                        Icon(Icons.Default.ChevronRight, null, tint = Muted)
                                     }
-                                    Icon(Icons.Default.ChevronRight, null, tint = Muted)
                                 }
                             }
                         }
                     }
+                    Text("BUILD 0.2.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
                 }
-
-                Text("BUILD 0.1.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun RemoteKeyButton(label: String, modifier: Modifier = Modifier, accent: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (accent) Accent else SurfaceDark,
+        tonalElevation = 2.dp
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = if (label.length > 5) 11.sp else 18.sp)
+        }
+    }
+}
+
+class SamsungRemoteClient(
+    private val onStatus: (String) -> Unit,
+    private val onConnected: (Boolean) -> Unit
+) {
+    private var socket: WebSocket? = null
+    private val client: OkHttpClient by lazy {
+        val trustManager = object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+        }
+        val ssl = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
+        }
+        OkHttpClient.Builder()
+            .sslSocketFactory(ssl.socketFactory, trustManager)
+            .hostnameVerifier { _, _ -> true }
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    fun connect(host: String, token: String?) {
+        disconnect()
+        onConnected(false)
+        onStatus("Connecting… approve the request on your TV")
+        val name = Base64.encodeToString("Universal Remote".toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val tokenPart = token?.let { "&token=$it" } ?: ""
+        val request = Request.Builder()
+            .url("wss://$host:8002/api/v2/channels/samsung.remote.control?name=$name$tokenPart")
+            .build()
+        socket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                onStatus("Connection opened. Waiting for Samsung authorization…")
+            }
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                runCatching {
+                    val root = JSONObject(text)
+                    when (root.optString("event")) {
+                        "ms.channel.connect" -> {
+                            val data = root.optJSONObject("data")
+                            val newToken = data?.optString("token")?.takeIf { it.isNotBlank() && it != "null" }
+                            if (newToken != null) onStatus("Paired. Save this TV connection before disconnecting.")
+                            onConnected(true)
+                            onStatus("Connected to Samsung TV")
+                        }
+                        "ms.channel.unauthorized" -> onStatus("Waiting for you to allow Universal Remote on the TV…")
+                        else -> onStatus("Samsung TV responded")
+                    }
+                }
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                onConnected(false)
+                onStatus("Connection failed: ${t.message ?: "check TV network remote settings"}")
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                onConnected(false)
+                onStatus("Disconnected")
+            }
+        })
+    }
+
+    fun sendKey(key: String) {
+        val payload = JSONObject().put("method", "ms.remote.control")
+            .put("params", JSONObject()
+                .put("Cmd", "Click")
+                .put("DataOfCmd", key)
+                .put("Option", "false")
+                .put("TypeOfRemote", "SendRemoteKey"))
+        val sent = socket?.send(payload.toString()) ?: false
+        if (!sent) onStatus("Not connected. Connect to the TV first.")
+    }
+
+    fun disconnect() {
+        socket?.close(1000, "User disconnected")
+        socket = null
+        onConnected(false)
     }
 }
 
