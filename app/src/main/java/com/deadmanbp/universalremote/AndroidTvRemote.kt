@@ -313,6 +313,7 @@ class AndroidTvRemote(
                     onDisconnected(e.message ?: "Google TV disconnected")
                 }
             }, "GoogleTV-reader").apply { isDaemon = true; start() }
+            Unit
         }.onFailure { closeSocket() }
     }
 
