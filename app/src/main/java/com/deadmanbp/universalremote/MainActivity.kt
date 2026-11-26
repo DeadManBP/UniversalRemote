@@ -109,7 +109,7 @@ fun UniversalRemoteApp(context: Context) {
             if (showRemote && selected != null) {
                 val device = selected!!
                 if (device.type.contains("Xbox", ignoreCase = true)) {
-                    XboxDiscoveryScreen(device) {
+                    XboxRemoteScreen(device) {
                         showRemote = false
                         selected = null
                     }
@@ -261,7 +261,7 @@ fun UniversalRemoteApp(context: Context) {
                             }
                         }
                     }
-                    Text("BUILD 0.4.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
+                    Text("BUILD 0.5.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
                 }
             }
         }
