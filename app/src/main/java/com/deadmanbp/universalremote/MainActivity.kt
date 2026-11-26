@@ -473,7 +473,7 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
         if (payloadLength <= 0 || payloadLength > packet.size - 6) return null
 
         // Response fields: flags, client type, then a length-prefixed console name.
-        for (offset in listOf(14, 8)) {
+        for (offset in listOf(12)) {
             if (offset + 2 > packet.size) continue
             val length = ((packet[offset].toInt() and 0xFF) shl 8) or
                 (packet[offset + 1].toInt() and 0xFF)
