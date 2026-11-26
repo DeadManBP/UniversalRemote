@@ -466,17 +466,16 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
     }
 
     private fun parseXboxDiscoveryName(packet: ByteArray): String? {
-        // SimpleMessage header is 8 bytes for discovery: type, payload length, version.
-        // The response payload starts with flags (4), client type (2), then SGString name.
-        if (packet.size < 16) return null
+        // Discovery SimpleMessage has a 6-byte header: type, unprotected length, version.
+        // Its payload starts with uint32 flags, uint16 client type, then an SGString name.
+        if (packet.size < 14) return null
         val buffer = java.nio.ByteBuffer.wrap(packet).order(java.nio.ByteOrder.BIG_ENDIAN)
         if ((buffer.short.toInt() and 0xFFFF) != 0xDD01) return null
         val payloadLength = buffer.short.toInt() and 0xFFFF
         val version = buffer.short.toInt() and 0xFFFF
-        if (version !in 0..2 || payloadLength < 8 || payloadLength > packet.size - 8) return null
+        if (version != 0 || payloadLength < 8 || payloadLength > packet.size - 6) return null
 
-        val nameOffset = 8 + 4 + 2
-        if (nameOffset + 2 > packet.size) return null
+        val nameOffset = 6 + 4 + 2
         val nameLength = ((packet[nameOffset].toInt() and 0xFF) shl 8) or
             (packet[nameOffset + 1].toInt() and 0xFF)
         if (nameLength !in 1..128 || nameOffset + 2 + nameLength > packet.size) return null
