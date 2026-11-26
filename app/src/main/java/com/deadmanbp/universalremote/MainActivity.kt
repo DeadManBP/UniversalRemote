@@ -77,7 +77,8 @@ fun UniversalRemoteApp(context: Context) {
     val remoteClient = remember {
         SamsungRemoteClient(
             onStatus = { remoteStatus = it },
-            onConnected = { connected = it }
+            onConnected = { connected = it },
+            onToken = { host, token -> prefs.edit().putString(host, token).apply() }
         )
     }
 
@@ -272,9 +273,11 @@ private fun RemoteKeyButton(label: String, modifier: Modifier = Modifier, accent
 
 class SamsungRemoteClient(
     private val onStatus: (String) -> Unit,
-    private val onConnected: (Boolean) -> Unit
+    private val onConnected: (Boolean) -> Unit,
+    private val onToken: (String, String) -> Unit
 ) {
     private var socket: WebSocket? = null
+    private var currentHost: String = ""
     private val client: OkHttpClient by lazy {
         val trustManager = object : X509TrustManager {
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
@@ -293,6 +296,7 @@ class SamsungRemoteClient(
     }
 
     fun connect(host: String, token: String?) {
+        currentHost = host
         disconnect()
         onConnected(false)
         onStatus("Connecting… approve the request on your TV")
@@ -312,7 +316,7 @@ class SamsungRemoteClient(
                         "ms.channel.connect" -> {
                             val data = root.optJSONObject("data")
                             val newToken = data?.optString("token")?.takeIf { it.isNotBlank() && it != "null" }
-                            if (newToken != null) onStatus("Paired. Save this TV connection before disconnecting.")
+                            if (newToken != null) onToken(currentHost, newToken)
                             onConnected(true)
                             onStatus("Connected to Samsung TV")
                         }
