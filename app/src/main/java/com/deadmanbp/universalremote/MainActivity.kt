@@ -30,6 +30,8 @@ import android.os.Handler
 import android.os.Looper
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
