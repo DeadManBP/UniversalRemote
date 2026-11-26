@@ -234,11 +234,9 @@ fun UniversalRemoteApp(context: Context) {
                                 Card(
                                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable {
                                         selected = device
+                                        showRemote = true
                                         if (device.type.contains("Samsung")) {
-                                            showRemote = true
                                             remoteStatus = "Ready to connect to ${device.host}"
-                                        } else {
-                                            status = "Google TV remote is coming next"
                                         }
                                     },
                                     colors = CardDefaults.cardColors(containerColor = SurfaceDark)
