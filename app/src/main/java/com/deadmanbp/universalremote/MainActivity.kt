@@ -72,7 +72,7 @@ fun UniversalRemoteApp(context: Context) {
     var scanning by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<FoundDevice?>(null) }
     var devices by remember { mutableStateOf(listOf<FoundDevice>()) }
-    var status by remember { mutableStateOf("Ready to discover TVs on your Wi-Fi network") }
+    var status by remember { mutableStateOf("Ready to discover devices on your Wi-Fi network") }
     var showRemote by remember { mutableStateOf(false) }
     var remoteStatus by remember { mutableStateOf("Not connected") }
     var connected by remember { mutableStateOf(false) }
@@ -206,7 +206,7 @@ fun UniversalRemoteApp(context: Context) {
                             status = "Searching for Samsung, Google and Xbox devices…"
                             discoverer.start {
                                 scanning = false
-                                status = if (devices.isEmpty()) "No compatible services found yet. Make sure both TVs are on and connected to Wi-Fi." else "Discovery finished • ${devices.size} device(s) found"
+                                status = if (devices.isEmpty()) "No compatible devices found yet. Make sure they are on and connected to Wi-Fi." else "Discovery finished • ${devices.size} device(s) found"
                             }
                         },
                         enabled = !scanning,
@@ -261,7 +261,7 @@ fun UniversalRemoteApp(context: Context) {
                             }
                         }
                     }
-                    Text("BUILD 0.3.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
+                    Text("BUILD 0.4.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
                 }
             }
         }
