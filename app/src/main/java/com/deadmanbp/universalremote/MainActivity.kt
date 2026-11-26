@@ -142,9 +142,9 @@ fun UniversalRemoteApp(context: Context) {
                     }
                     Spacer(Modifier.height(14.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        RemoteKeyButton("VOL −", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLUMEDOWN") }
+                        RemoteKeyButton("VOL −", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLDOWN") }
                         RemoteKeyButton("MUTE", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_MUTE") }
-                        RemoteKeyButton("VOL +", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLUMEUP") }
+                        RemoteKeyButton("VOL +", Modifier.weight(1f).height(58.dp)) { remoteClient.sendKey("KEY_VOLUP") }
                     }
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
