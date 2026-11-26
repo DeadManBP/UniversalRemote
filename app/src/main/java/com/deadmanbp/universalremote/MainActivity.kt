@@ -466,22 +466,24 @@ class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit)
     }
 
     private fun parseXboxDiscoveryName(packet: ByteArray): String? {
-        // Discovery SimpleMessage has a 6-byte header: type, unprotected length, version.
-        // Its payload starts with uint32 flags, uint16 client type, then an SGString name.
-        if (packet.size < 14) return null
+        if (packet.size < 16) return null
         val buffer = java.nio.ByteBuffer.wrap(packet).order(java.nio.ByteOrder.BIG_ENDIAN)
         if ((buffer.short.toInt() and 0xFFFF) != 0xDD01) return null
         val payloadLength = buffer.short.toInt() and 0xFFFF
-        val version = buffer.short.toInt() and 0xFFFF
-        if (version != 0 || payloadLength < 8 || payloadLength > packet.size - 6) return null
+        if (payloadLength <= 0 || payloadLength > packet.size - 6) return null
 
-        val nameOffset = 6 + 4 + 2
-        val nameLength = ((packet[nameOffset].toInt() and 0xFF) shl 8) or
-            (packet[nameOffset + 1].toInt() and 0xFF)
-        if (nameLength !in 1..128 || nameOffset + 2 + nameLength > packet.size) return null
-        return String(packet, nameOffset + 2, nameLength, Charsets.UTF_8)
-            .trim()
-            .takeIf { it.isNotBlank() && it.none { ch -> ch.isISOControl() } }
+        // Response fields: flags, client type, then a length-prefixed console name.
+        for (offset in listOf(12)) {
+            if (offset + 2 > packet.size) continue
+            val length = ((packet[offset].toInt() and 0xFF) shl 8) or
+                (packet[offset + 1].toInt() and 0xFF)
+            if (length !in 1..128 || offset + 2 + length > packet.size) continue
+            val name = String(packet, offset + 2, length, Charsets.UTF_8)
+                .trim()
+                .takeIf { it.isNotBlank() && it.none { ch -> ch.isISOControl() } }
+            if (name != null) return name
+        }
+        return "Xbox Console"
     }
 
     private fun scanSamsungSubnet() {
