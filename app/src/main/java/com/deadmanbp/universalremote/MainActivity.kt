@@ -22,6 +22,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.Socket
+import java.net.URL
+import java.util.Collections
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val Background = Color(0xFF101114)
 private val SurfaceDark = Color(0xFF1B1D22)
@@ -155,50 +170,140 @@ fun UniversalRemoteApp(context: Context) {
 }
 
 class TvDiscovery(context: Context, private val onDevice: (FoundDevice) -> Unit) {
-    private val manager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val appContext = context.applicationContext
+    private val manager = appContext.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val listeners = mutableListOf<NsdManager.DiscoveryListener>()
     private val serviceTypes = listOf("_androidtvremote2._tcp.", "_samsungmsf._tcp.", "_smartview._tcp.")
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun start(onFinished: () -> Unit) {
         stop()
-        var remaining = serviceTypes.size
+        val finished = AtomicBoolean(false)
+        fun finishScan() {
+            if (finished.compareAndSet(false, true)) {
+                stop()
+                mainHandler.post { onFinished() }
+            }
+        }
+
         serviceTypes.forEach { serviceType ->
             val listener = object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(type: String) {}
                 override fun onServiceFound(service: NsdServiceInfo) {
-                    manager.resolveService(service, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {}
-                        override fun onServiceResolved(info: NsdServiceInfo) {
-                            val label = when {
-                                serviceType.contains("androidtv") -> "Google TV"
-                                else -> "Samsung TV"
+                    if (finished.get()) return
+                    runCatching {
+                        manager.resolveService(service, object : NsdManager.ResolveListener {
+                            override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {}
+                            override fun onServiceResolved(info: NsdServiceInfo) {
+                                if (finished.get()) return
+                                val label = if (serviceType.contains("androidtv")) "Google TV" else "Samsung TV"
+                                val found = FoundDevice(info.serviceName, label, info.host?.hostAddress ?: "unknown", info.port)
+                                mainHandler.post { if (!finished.get()) onDevice(found) }
                             }
-                            onDevice(FoundDevice(info.serviceName, label, info.host?.hostAddress ?: "unknown", info.port))
-                        }
-                    })
+                        })
+                    }
                 }
                 override fun onServiceLost(service: NsdServiceInfo) {}
                 override fun onDiscoveryStopped(type: String) {}
-                override fun onStartDiscoveryFailed(type: String, errorCode: Int) { finishOne() }
-                override fun onStopDiscoveryFailed(type: String, errorCode: Int) {}
-                private fun finishOne() {
+                override fun onStartDiscoveryFailed(type: String, errorCode: Int) {
                     runCatching { manager.stopServiceDiscovery(this) }
-                    remaining--
-                    if (remaining <= 0) onFinished()
                 }
+                override fun onStopDiscoveryFailed(type: String, errorCode: Int) {}
             }
             listeners.add(listener)
             runCatching { manager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener) }
-                .onFailure {
-                    remaining--
-                    if (remaining <= 0) onFinished()
-                }
         }
-        // Discovery window is intentionally short for this first prototype.
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            stop()
-            onFinished()
-        }, 9000)
+
+        // Samsung sets do not always advertise an mDNS service. Also probe the
+        // local Wi-Fi subnet for Samsung's documented Smart TV HTTP API on port 8001.
+        Thread({ scanSamsungSubnet() }, "Samsung-TV-Subnet-Scan").start()
+
+        // Keep DNS-SD discovery alive long enough to receive delayed announcements.
+        mainHandler.postDelayed({ finishScan() }, 12000)
+    }
+
+    private fun scanSamsungSubnet() {
+        val subnet = findWifiSubnet() ?: return
+        val (network, prefix, ownAddress) = subnet
+        val hostCount = 1 shl (32 - prefix)
+        val executor = Executors.newFixedThreadPool(32)
+        for (host in 1 until hostCount - 1) {
+            val addressInt = network or host
+            if (addressInt == ownAddress) continue
+            val address = intToAddress(addressInt)
+            executor.submit {
+                probeSamsungApi(address)
+            }
+        }
+        executor.shutdown()
+        runCatching { executor.awaitTermination(10, TimeUnit.SECONDS) }
+        executor.shutdownNow()
+    }
+
+    private fun findWifiSubnet(): Triple<Int, Int, Int>? {
+        val interfaces = runCatching { Collections.list(NetworkInterface.getNetworkInterfaces()) }.getOrNull()
+            ?: return null
+        val active = interfaces.filter { iface ->
+            runCatching { iface.isUp && !iface.isLoopback }.getOrDefault(false)
+        }.sortedBy { iface ->
+            if (iface.name.startsWith("wlan", ignoreCase = true) ||
+                iface.name.startsWith("wifi", ignoreCase = true)) 0 else 1
+        }
+
+        for (iface in active) {
+            for (entry in iface.interfaceAddresses) {
+                val ipv4 = entry.address as? Inet4Address ?: continue
+                val prefix = entry.networkPrefixLength.toInt().coerceAtLeast(24)
+                if (prefix !in 24..30) continue
+                val bytes = ipv4.address
+                val own = ((bytes[0].toInt() and 255) shl 24) or
+                    ((bytes[1].toInt() and 255) shl 16) or
+                    ((bytes[2].toInt() and 255) shl 8) or
+                    (bytes[3].toInt() and 255)
+                val mask = -1 shl (32 - prefix)
+                return Triple(own and mask, prefix, own)
+            }
+        }
+        return null
+    }
+
+    private fun intToAddress(value: Int): String =
+        "${(value ushr 24) and 255}.${(value ushr 16) and 255}.${(value ushr 8) and 255}.${value and 255}"
+
+    private fun probeSamsungApi(host: String) {
+        val open = runCatching {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, 8001), 350)
+            }
+            true
+        }.getOrDefault(false)
+        if (!open) return
+
+        val connection = runCatching {
+            (URL("http://$host:8001/api/v2/").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 700
+                readTimeout = 700
+                useCaches = false
+            }
+        }.getOrNull() ?: return
+
+        try {
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = JSONObject(body)
+            val device = root.optJSONObject("device") ?: return
+            val name = device.optString("name").takeIf { it.isNotBlank() }
+                ?: device.optString("model").takeIf { it.isNotBlank() }
+                ?: "Samsung Smart TV"
+            mainHandler.post {
+                onDevice(FoundDevice(name, "Samsung Tizen", host, 8001))
+            }
+        } catch (_: Exception) {
+            // An open port alone is not enough to label a device as a Samsung TV.
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun stop() {
