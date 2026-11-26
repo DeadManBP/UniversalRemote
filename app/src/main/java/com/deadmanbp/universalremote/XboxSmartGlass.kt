@@ -146,7 +146,7 @@ private class XboxSmartGlassClient(private val host: String) : Closeable {
         val request = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
             .putShort(0xDD00.toShort())
             .putShort(10)
-            .putShort(0)
+            .putShort(2)
             .putInt(0)
             .putShort(0x08)
             .putShort(0)
@@ -177,7 +177,7 @@ private class XboxSmartGlassClient(private val host: String) : Closeable {
         require((input.short.toInt() and 0xFFFF) == 0xDD01) { "Not a SmartGlass discovery response" }
         val payloadLength = input.short.toInt() and 0xFFFF
         val version = input.short.toInt() and 0xFFFF
-        require(version == 0) { "Unexpected discovery packet version $version" }
+        require(version == 2) { "Unexpected discovery packet version $version" }
         require(payloadLength <= input.remaining() && payloadLength >= 12) { "Incomplete discovery payload" }
 
         val flags = input.int
