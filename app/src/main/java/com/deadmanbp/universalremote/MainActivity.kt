@@ -106,7 +106,12 @@ fun UniversalRemoteApp(context: Context) {
         Surface(modifier = Modifier.fillMaxSize(), color = Background) {
             if (showRemote && selected != null) {
                 val device = selected!!
-                Column(
+                if (!device.type.contains("Samsung", ignoreCase = true)) {
+                    GoogleTvRemoteScreen(context, device) {
+                        showRemote = false
+                        selected = null
+                    }
+                } else Column(
                     modifier = Modifier.fillMaxSize().padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -251,7 +256,7 @@ fun UniversalRemoteApp(context: Context) {
                             }
                         }
                     }
-                    Text("BUILD 0.2.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
+                    Text("BUILD 0.3.0 • LOCAL NETWORK ONLY", color = Color(0xFF62656E), fontSize = 9.sp, letterSpacing = 1.2.sp)
                 }
             }
         }
