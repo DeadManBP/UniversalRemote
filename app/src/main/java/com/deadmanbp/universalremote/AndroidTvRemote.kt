@@ -339,6 +339,21 @@ class AndroidTvRemote(
         send(PbWriter().apply { message(10) { number(1, keyCode); number(2, 3) } }.result())
     }
 
+    /**
+     * Launch an Android TV app through the Remote v2 app-link request.
+     * The URL is resolved by the TV; packageName identifies the target app.
+     */
+    fun launchApp(packageName: String, appLink: String) {
+        if (!ready) return
+        send(PbWriter().apply {
+            message(90) {
+                string(1, appLink)
+                string(2, packageName)
+                number(3, 1)
+            }
+        }.result())
+    }
+
     private fun send(payload: ByteArray) {
         val socket = connection?.socket ?: return
         runCatching { writer.execute { runCatching { socket.outputStream.writePbFrame(payload) }
