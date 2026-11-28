@@ -157,6 +157,10 @@ fun UniversalRemoteApp(context: Context) {
                         RemoteKeyButton("PLAY / PAUSE", Modifier.weight(1.5f).height(54.dp)) { remoteClient.sendKey("KEY_PLAY") }
                         RemoteKeyButton("CH +", Modifier.weight(1f).height(54.dp)) { remoteClient.sendKey("KEY_CHUP") }
                     }
+                    Spacer(Modifier.height(14.dp))
+                    AppShortcutsRow(isSamsung = true) { app ->
+                        remoteClient.launchApp(app.samsungAppId)
+                    }
                     Spacer(Modifier.weight(1f))
                     Button(
                         onClick = {
@@ -349,6 +353,20 @@ class SamsungRemoteClient(
                 .put("TypeOfRemote", "SendRemoteKey"))
         val sent = socket?.send(payload.toString()) ?: false
         if (!sent) onStatus("Not connected. Connect to the TV first.")
+    }
+
+    fun launchApp(appId: String) {
+        val payload = JSONObject()
+            .put("method", "ms.channel.emit")
+            .put("params", JSONObject()
+                .put("event", "ed.apps.launch")
+                .put("to", "host")
+                .put("data", JSONObject()
+                    .put("appId", appId)
+                    .put("action_type", "NATIVE_LAUNCH")))
+        val sent = socket?.send(payload.toString()) ?: false
+        if (!sent) onStatus("Not connected. Connect to the TV first.")
+        else onStatus("Sent app launch request to Samsung TV")
     }
 
     fun disconnect() {
