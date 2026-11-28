@@ -138,6 +138,11 @@ fun GoogleTvRemoteScreen(context: Context, device: FoundDevice, onBack: () -> Un
                 TvButton("PAUSE", Modifier.weight(1f).height(50.dp)) { remote?.sendKey(AndroidTvKey.PAUSE) }
                 TvButton("MENU", Modifier.weight(1f).height(50.dp)) { remote?.sendKey(AndroidTvKey.MENU) }
             }
+            Spacer(Modifier.height(14.dp))
+            AppShortcutsRow(isSamsung = false) { app ->
+                remote?.launchApp(app.googlePackage, app.googleAppLink)
+                status = "Sent " + app.name + " launch request"
+            }
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = {
